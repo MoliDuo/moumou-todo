@@ -50,10 +50,14 @@
       ]
     },
     "nsis": {
+      "artifactName": "moumou-todo-${version}-setup-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "moumou-todo-${version}-portable-${arch}.${ext}"
     }
   },
   "dependencies": {
