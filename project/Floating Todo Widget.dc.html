@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/organic-02c3b538-9191-49bc-8668-3755c7fb34f9/styles.css">
+  <script src="_ds/organic-02c3b538-9191-49bc-8668-3755c7fb34f9/_ds_bundle.js"></script>
+  <style>
+    body { margin: 0; }
+    ::selection { background: var(--color-neutral-300); }
+  </style>
+</helmet>
+<div style="position:relative; width:100vw; height:100vh; min-height:600px; background:linear-gradient(160deg, var(--color-neutral-100), var(--color-bg)); overflow:hidden;">
+  <div style="{{ widgetStyle }}">
+    <div style="display:flex; align-items:center; gap:8px; padding:10px 10px 10px 8px; background:#f5f5f5; border-bottom:1px solid #e5e5e5;">
+      <div onMouseDown="{{ onDragStart }}" title="拖动移动位置" style="cursor:grab; color:#8a8a8a; display:flex; padding:6px; border-radius:var(--radius-md); flex-shrink:0;">
+        <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="4" cy="3" r="1.3" fill="currentColor"></circle><circle cx="10" cy="3" r="1.3" fill="currentColor"></circle><circle cx="4" cy="7" r="1.3" fill="currentColor"></circle><circle cx="10" cy="7" r="1.3" fill="currentColor"></circle><circle cx="4" cy="11" r="1.3" fill="currentColor"></circle><circle cx="10" cy="11" r="1.3" fill="currentColor"></circle></svg>
+      </div>
+      <input type="text" placeholder="添加任务，回车确认" value="{{ inputValue }}" onChange="{{ onInputChange }}" onKeyDown="{{ onInputKeyDown }}" style="flex:1; min-width:0; border:1px solid #d4d4d4; border-radius:999px; padding:8px 14px; font-family:var(--font-body); font-size:14px; background:#ffffff; color:#111111; outline:none;" style-focus="border-color:#111111; box-shadow:0 0 0 2px #e5e5e5;"></input>
+      <button onClick="{{ onToggleCollapse }}" title="折叠 / 展开" style="width:32px; height:32px; border-radius:999px; border:none; background:transparent; color:#525252; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; padding:0;" style-hover="background:#e5e5e5;" style-focus="outline:2px solid #111111; outline-offset:2px;">
+        <sc-if value="{{ collapsed }}" hint-placeholder-val="{{ false }}">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </sc-if>
+        <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+        </sc-if>
+      </button>
+    </div>
+    <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div style="{{ taskListStyle }}">
+          <sc-if value="{{ noTasks }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:22px 10px; text-align:center; color:#8a8a8a; font-size:13px;">还没有任务，输入后按 Enter 添加</div>
+          </sc-if>
+          <sc-for list="{{ tasks }}" as="item" hint-placeholder-count="3">
+            <div draggable="{{ item.draggable }}" onDragStart="{{ item.onDragStart }}" onDragOver="{{ item.onDragOver }}" onDrop="{{ item.onDrop }}" onDragEnd="{{ item.onDragEnd }}" style="{{ item.rowStyle }}" style-hover="background:#f5f5f5;">
+              <div style="cursor:grab; color:#a3a3a3; display:flex; flex-shrink:0;" title="拖动调整顺序">
+                <svg width="10" height="14" viewBox="0 0 10 14"><circle cx="2.5" cy="2" r="1.2" fill="currentColor"></circle><circle cx="7.5" cy="2" r="1.2" fill="currentColor"></circle><circle cx="2.5" cy="7" r="1.2" fill="currentColor"></circle><circle cx="7.5" cy="7" r="1.2" fill="currentColor"></circle><circle cx="2.5" cy="12" r="1.2" fill="currentColor"></circle><circle cx="7.5" cy="12" r="1.2" fill="currentColor"></circle></svg>
+              </div>
+              <button onClick="{{ item.onToggle }}" style="{{ item.checkboxStyle }}" title="完成 / 取消完成">
+                <sc-if value="{{ item.done }}" hint-placeholder-val="{{ false }}">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </sc-if>
+              </button>
+              <span style="{{ item.textStyle }}">{{ item.text }}</span>
+              <button onClick="{{ item.onDelete }}" title="删除" style="width:22px; height:22px; border:none; background:transparent; color:#a3a3a3; display:flex; align-items:center; justify-content:center; cursor:pointer; border-radius:999px; flex-shrink:0; padding:0;" style-hover="background:#e5e5e5; color:#404040;">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+      <div onMouseDown="{{ onResizeStart }}" title="拖动调整窗口大小" style="position:absolute; right:2px; bottom:2px; width:16px; height:16px; display:flex; align-items:center; justify-content:center; cursor:nwse-resize; color:#a3a3a3; z-index:10;">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><line x1="21" y1="9" x2="9" y2="21"></line><line x1="21" y1="15" x2="15" y2="21"></line></svg>
+      </div>
+    </sc-if>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:420,&quot;height&quot;:560},&quot;startCollapsed&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;corner&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;top-right&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;top-right&quot;,&quot;top-left&quot;,&quot;bottom-right&quot;,&quot;bottom-left&quot;]}}">
+class Component extends DCLogic {
+  state = {
+    tasks: [
+      { id: 1, text: '买咖啡豆', done: true },
+      { id: 2, text: '写周报', done: false },
+      { id: 3, text: '回复邮件', done: false },
+      { id: 4, text: '预约牙医', done: true },
+    ],
+    collapsed: false,
+    inputValue: '',
+    pos: null,
+    size: null,
+  };
+
+  componentDidMount() {
+    const corner = this.props.corner || 'top-right';
+    const w = 320, h = 420, m = 28;
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+    let pos;
+    if (corner === 'top-left') pos = { top: m, left: m };
+    else if (corner === 'bottom-right') pos = { top: Math.max(m, vh - h - m), left: Math.max(m, vw - w - m) };
+    else if (corner === 'bottom-left') pos = { top: Math.max(m, vh - h - m), left: m };
+    else pos = { top: m, left: Math.max(m, vw - w - m) };
+    this.setState({ pos, collapsed: !!this.props.startCollapsed });
+  }
+
+  handleInputChange = (e) => this.setState({ inputValue: e.target.value });
+
+  handleInputKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      const val = this.state.inputValue.trim();
+      if (val) {
+        const task = { id: Date.now() + Math.random(), text: val, done: false };
+        this.setState({ tasks: [...this.state.tasks, task], inputValue: '' });
+      }
+    }
+  };
+
+  toggleCollapse = () => this.setState((s) => ({ collapsed: !s.collapsed }));
+
+  handleDragStart = (e) => {
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const origin = this.state.pos || { top: 24, left: 24 };
+    const onMove = (ev) => {
+      this.setState({ pos: { top: origin.top + (ev.clientY - startY), left: origin.left + (ev.clientX - startX) } });
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  handleResizeStart = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const origin = this.state.size || { width: 320, height: 360 };
+    const onMove = (ev) => {
+      const width = Math.min(480, Math.max(260, origin.width + (ev.clientX - startX)));
+      const height = Math.min(600, Math.max(120, origin.height + (ev.clientY - startY)));
+      this.setState({ size: { width, height } });
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  handleTaskDragStart(index) {
+    this._dragIndex = index;
+  }
+
+  handleTaskDrop(index) {
+    const from = this._dragIndex;
+    this._dragIndex = null;
+    if (from == null || from === index) return;
+    const tasks = [...this.state.tasks];
+    const [moved] = tasks.splice(from, 1);
+    tasks.splice(index, 0, moved);
+    this.setState({ tasks });
+  }
+
+  toggleTask(id) {
+    const tasks = this.state.tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+    this.setState({ tasks });
+  }
+
+  deleteTask(id) {
+    this.setState({ tasks: this.state.tasks.filter((t) => t.id !== id) });
+  }
+
+  renderVals() {
+    const pos = this.state.pos || { top: 24, left: 24 };
+    const size = this.state.size || { width: 320, height: 360 };
+    const widgetStyle = {
+      position: 'fixed', top: pos.top + 'px', left: pos.left + 'px', width: size.width + 'px', zIndex: 1000,
+      background: '#ffffff', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)',
+      border: '1px solid #e5e5e5', overflow: 'hidden', fontFamily: 'var(--font-body)', color: '#111111',
+    };
+    const taskListStyle = { padding: '6px 8px 8px', display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: size.height + 'px', overflowY: 'auto' };
+    const rowStyle = { display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 6px', borderRadius: 'var(--radius-md)' };
+    const doneCheckboxStyle = { width: '22px', height: '22px', minWidth: '22px', borderRadius: '999px', border: '2px solid var(--color-neutral-900)', background: 'var(--color-neutral-900)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, color: '#fff' };
+    const openCheckboxStyle = { width: '22px', height: '22px', minWidth: '22px', borderRadius: '999px', border: '2px solid #a3a3a3', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 };
+    const doneTextStyle = { flex: 1, minWidth: 0, fontSize: '14px', lineHeight: '1.4', color: '#737373' };
+    const openTextStyle = { flex: 1, minWidth: 0, fontSize: '14px', lineHeight: '1.4', color: '#111111' };
+    const tasks = this.state.tasks.map((t, idx) => ({
+      ...t,
+      onToggle: () => this.toggleTask(t.id),
+      onDelete: () => this.deleteTask(t.id),
+      checkboxStyle: t.done ? doneCheckboxStyle : openCheckboxStyle,
+      textStyle: t.done ? doneTextStyle : openTextStyle,
+      rowStyle,
+      draggable: true,
+      onDragStart: () => this.handleTaskDragStart(idx),
+      onDragOver: (e) => e.preventDefault(),
+      onDrop: () => this.handleTaskDrop(idx),
+      onDragEnd: () => { this._dragIndex = null; },
+    }));
+    return {
+      widgetStyle,
+      taskListStyle,
+      onResizeStart: this.handleResizeStart,
+      collapsed: this.state.collapsed,
+      expanded: !this.state.collapsed,
+      inputValue: this.state.inputValue,
+      onInputChange: this.handleInputChange,
+      onInputKeyDown: this.handleInputKeyDown,
+      onDragStart: this.handleDragStart,
+      onToggleCollapse: this.toggleCollapse,
+      tasks,
+      hasTasks: tasks.length > 0,
+      noTasks: tasks.length === 0,
+      doneCount: this.state.tasks.filter((t) => t.done).length,
+      totalCount: this.state.tasks.length,
+    };
+  }
+}
+</script>
+</body>
+</html>
