@@ -41,10 +41,24 @@ function updateMousePassThrough(position = lastPointerPosition) {
   setMouseEventsIgnored(!isPointInsideWidget(position.x, position.y));
 }
 
-document.addEventListener('pointermove', (event) => {
+function trackMousePosition(event) {
   lastPointerPosition = { x: event.clientX, y: event.clientY };
   updateMousePassThrough();
-}, true);
+}
+
+document.addEventListener('pointermove', trackMousePosition, true);
+// Electron forwards mouse movement while click-through is enabled. Listen for
+// mousemove too: recovery must not depend on receiving a PointerEvent.
+document.addEventListener('mousemove', trackMousePosition, true);
+
+function resetMousePassThrough() {
+  activePointers.clear();
+  lastPointerPosition = null;
+  setMouseEventsIgnored(false);
+}
+
+window.addEventListener('blur', resetMousePassThrough);
+window.addEventListener('focus', resetMousePassThrough);
 
 document.addEventListener('pointerdown', (event) => {
   lastPointerPosition = { x: event.clientX, y: event.clientY };
