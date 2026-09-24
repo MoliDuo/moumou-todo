@@ -89,10 +89,8 @@ html, body {
   color: #111111;
   outline: none;
   resize: none;
-  /* Scroll once the text outgrows max-height instead of hiding it and the caret. */
-  overflow-y: auto;
-  scrollbar-width: thin;
-  max-height: 120px;
+  /* No scrollbar: long text wraps and autoGrow() makes the box taller. */
+  overflow: hidden;
 }
 #task-input:focus {
   border-color: #111111;

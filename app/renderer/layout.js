@@ -13,12 +13,7 @@
   // `size.height` is the task list's max-height, not the whole widget.
   const LIST_MIN_HEIGHT = 120;
   const LIST_MAX_HEIGHT = 600;
-  // Generous allowance for everything above/around the task list (header row,
-  // task input growing to its own max-height, borders) so the window's max bound
-  // never clips the widget once the list is dragged toward its max.
-  const CHROME_HEIGHT = 160;
   const WIDGET_MIN_HEIGHT = 52;
-  const WIDGET_MAX_HEIGHT = LIST_MAX_HEIGHT + CHROME_HEIGHT;
   // Height of a collapsed widget, used to size the window before the renderer reports.
   const HEADER_HEIGHT = 60;
 
@@ -34,9 +29,7 @@
     WIDGET_MAX_WIDTH,
     LIST_MIN_HEIGHT,
     LIST_MAX_HEIGHT,
-    CHROME_HEIGHT,
     WIDGET_MIN_HEIGHT,
-    WIDGET_MAX_HEIGHT,
     HEADER_HEIGHT,
     DEFAULT_SIZE,
     clamp,

@@ -37,6 +37,7 @@ function makeElement(id) {
     innerHTML: '',
     scrollHeight: 20,
     offsetHeight: 60,
+    clientHeight: 58,
     dataset: {},
     style: { setProperty() {} },
     classList: { toggle() {}, add() {}, remove() {} },

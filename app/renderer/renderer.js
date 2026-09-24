@@ -115,7 +115,16 @@ function escapeHtml(value) {
 
 function autoGrow(textarea) {
   textarea.style.height = 'auto';
-  textarea.style.height = textarea.scrollHeight + 'px';
+  // scrollHeight excludes the border but a border-box height includes it;
+  // without it the text is 2px taller than the box and would overflow.
+  const border = textarea.offsetHeight - textarea.clientHeight;
+  textarea.style.height = textarea.scrollHeight + border + 'px';
+}
+
+// The header grows with the task input, which shrinks the room left for the list.
+function growTaskInput() {
+  autoGrow(inputEl);
+  applySize();
 }
 
 // Enter submits, Shift+Enter inserts a newline, and an Enter that confirms an
@@ -406,10 +415,9 @@ async function init() {
   size = state.size || size;
   renderTasks();
   applyCollapsed();
-  applySize();
-  autoGrow(inputEl);
+  growTaskInput();
   // Figtree's metrics differ from the fallback font the first measurement used.
-  document.fonts?.ready.then(() => autoGrow(inputEl));
+  document.fonts?.ready.then(growTaskInput);
 
   new ResizeObserver(reportWidgetSize).observe(widgetEl);
 }
@@ -421,12 +429,12 @@ inputEl.addEventListener('keydown', (e) => {
   if (!val) return;
   tasks.push({ id: newTaskId(), text: val, done: false });
   inputEl.value = '';
-  autoGrow(inputEl);
+  growTaskInput();
   renderTasks();
   persist({ tasks });
 });
 
-inputEl.addEventListener('input', () => autoGrow(inputEl));
+inputEl.addEventListener('input', growTaskInput);
 
 collapseBtn.addEventListener('click', () => {
   collapsed = !collapsed;

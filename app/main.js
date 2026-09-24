@@ -9,7 +9,6 @@ const {
   WIDGET_MIN_WIDTH,
   WIDGET_MAX_WIDTH,
   WIDGET_MIN_HEIGHT,
-  WIDGET_MAX_HEIGHT,
   HEADER_HEIGHT,
   clamp,
 } = require('./renderer/layout');
@@ -24,7 +23,6 @@ const store = new Store({ filePath: path.join(app.getPath('userData'), 'store.js
 const MIN_WINDOW_WIDTH = WIDGET_MIN_WIDTH + SHADOW_PAD * 2;
 const MAX_WINDOW_WIDTH = WIDGET_MAX_WIDTH + SHADOW_PAD * 2;
 const MIN_WINDOW_HEIGHT = WIDGET_MIN_HEIGHT + SHADOW_PAD * 2;
-const MAX_WINDOW_HEIGHT = WIDGET_MAX_HEIGHT + SHADOW_PAD * 2;
 // Show the window without waiting for the renderer's first size report after this long.
 const INITIAL_SHOW_TIMEOUT_MS = 1000;
 
@@ -83,7 +81,6 @@ function createWindow() {
     minWidth: MIN_WINDOW_WIDTH,
     maxWidth: MAX_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
-    maxHeight: MAX_WINDOW_HEIGHT,
     frame: false,
     transparent: true,
     hasShadow: false,
@@ -281,7 +278,8 @@ function registerIpc() {
     if (!Number.isFinite(width) || !Number.isFinite(height)) return;
 
     const { workArea } = screen.getDisplayMatching(win.getBounds());
-    const maxHeight = Math.min(MAX_WINDOW_HEIGHT, maxWindowHeightFor(workArea, SHADOW_PAD));
+    // The task input grows without a limit, so the screen is the only height bound.
+    const maxHeight = maxWindowHeightFor(workArea, SHADOW_PAD);
     const w = Math.round(clamp(width, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH));
     const h = Math.round(clamp(height, MIN_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, maxHeight)));
     win.setContentSize(w, h);
