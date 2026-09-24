@@ -1,4 +1,14 @@
-const SHADOW_PAD = 32; // must match SHADOW_PAD in main.js
+const {
+  SHADOW_PAD,
+  WIDGET_MIN_WIDTH,
+  WIDGET_MAX_WIDTH,
+  LIST_MIN_HEIGHT,
+  LIST_MAX_HEIGHT,
+  DEFAULT_SIZE,
+  clamp,
+} = window.WidgetLayout;
+
+document.documentElement.style.setProperty('--shadow-pad', `${SHADOW_PAD}px`);
 
 const widgetEl = document.getElementById('widget');
 const headerEl = document.getElementById('header');
@@ -9,22 +19,32 @@ const iconDown = document.getElementById('icon-chevron-down');
 const iconUp = document.getElementById('icon-chevron-up');
 const resizeHandle = document.getElementById('resize-handle');
 
+// Reorder auto-scroll: distance from the list edge that starts scrolling, and max px per frame.
+const AUTO_SCROLL_EDGE = 28;
+const AUTO_SCROLL_MAX_STEP = 12;
+
 let tasks = [];
 let collapsed = false;
-let size = { width: 320, height: 360 };
+let size = { ...DEFAULT_SIZE };
 let dragState = null;
 let mouseEventsIgnored = false;
 let lastPointerPosition = null;
+let widgetRadius = null;
 const activePointers = new Set();
+
+// ── Mouse pass-through ────────────────────────────────────────────────────────
+
+function getWidgetRadius() {
+  // The corner radius is fixed in CSS; reading it on every mouse move would force a style recalc.
+  if (widgetRadius === null) {
+    widgetRadius = parseFloat(getComputedStyle(widgetEl).borderTopLeftRadius) || 0;
+  }
+  return widgetRadius;
+}
 
 function isPointInsideWidget(x, y) {
   const rect = widgetEl.getBoundingClientRect();
-  const radius = Math.min(
-    parseFloat(getComputedStyle(widgetEl).borderTopLeftRadius) || 0,
-    rect.width / 2,
-    rect.height / 2
-  );
-  return window.WidgetHitTest.isPointInsideRoundedRect(x, y, rect, radius);
+  return window.WidgetHitTest.isPointInsideRoundedRect(x, y, rect, getWidgetRadius());
 }
 
 function setMouseEventsIgnored(ignore) {
@@ -42,6 +62,14 @@ function updateMousePassThrough(position = lastPointerPosition) {
 }
 
 function trackMousePosition(event) {
+  // pointermove and mousemove both fire for one movement; evaluate each position once.
+  if (
+    lastPointerPosition &&
+    lastPointerPosition.x === event.clientX &&
+    lastPointerPosition.y === event.clientY
+  ) {
+    return;
+  }
   lastPointerPosition = { x: event.clientX, y: event.clientY };
   updateMousePassThrough();
 }
@@ -77,15 +105,43 @@ function finishPointerInteraction(event) {
 window.addEventListener('pointerup', finishPointerInteraction);
 window.addEventListener('pointercancel', finishPointerInteraction);
 
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => HTML_ESCAPES[ch]);
 }
 
 function autoGrow(textarea) {
   textarea.style.height = 'auto';
   textarea.style.height = textarea.scrollHeight + 'px';
+}
+
+// Enter submits, Shift+Enter inserts a newline, and an Enter that confirms an
+// IME composition (e.g. committing pinyin as letters) does neither.
+function isSubmitEnter(e) {
+  return e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229;
+}
+
+function newTaskId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function persist(partial) {
+  window.widgetAPI.saveState(partial);
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
+function createTaskTextEl(task) {
+  const span = document.createElement('span');
+  span.className = task.done ? 'task-text done' : 'task-text';
+  span.textContent = task.text;
+  return span;
 }
 
 function renderTasks() {
@@ -100,11 +156,11 @@ function renderTasks() {
       <div class="task-grip" data-drag="${idx}" title="拖动调整顺序">
         <svg width="10" height="14" viewBox="0 0 10 14"><circle cx="2.5" cy="2" r="1.2" fill="currentColor"></circle><circle cx="7.5" cy="2" r="1.2" fill="currentColor"></circle><circle cx="2.5" cy="7" r="1.2" fill="currentColor"></circle><circle cx="7.5" cy="7" r="1.2" fill="currentColor"></circle><circle cx="2.5" cy="12" r="1.2" fill="currentColor"></circle><circle cx="7.5" cy="12" r="1.2" fill="currentColor"></circle></svg>
       </div>
-      <button class="task-checkbox ${t.done ? 'done' : ''}" data-action="toggle" data-id="${t.id}" title="完成 / 取消完成">
+      <button class="task-checkbox ${t.done ? 'done' : ''}" data-action="toggle" data-id="${escapeHtml(t.id)}" title="完成 / 取消完成" aria-label="完成 / 取消完成">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
       </button>
       <span class="task-text ${t.done ? 'done' : ''}">${escapeHtml(t.text)}</span>
-      <button class="task-delete" data-action="delete" data-id="${t.id}" title="删除">
+      <button class="task-delete" data-action="delete" data-id="${escapeHtml(t.id)}" title="删除" aria-label="删除">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
       </button>
     </div>`
@@ -122,18 +178,31 @@ function applyCollapsed() {
   iconUp.style.display = collapsed ? 'none' : 'block';
 }
 
+// On a short screen, cap the list so the whole widget still fits the work area.
+function availableListHeight() {
+  const available = window.screen && window.screen.availHeight;
+  if (!Number.isFinite(available)) return LIST_MAX_HEIGHT;
+  const chrome = headerEl.offsetHeight + 2; // + the widget's top and bottom border
+  return Math.max(LIST_MIN_HEIGHT, available - chrome);
+}
+
 function applySize() {
   widgetEl.style.width = size.width + 'px';
-  taskListEl.style.maxHeight = size.height + 'px';
+  taskListEl.style.maxHeight = Math.min(size.height, availableListHeight()) + 'px';
 }
 
-function persist(partial) {
-  window.widgetAPI.saveState(partial);
+function reportWidgetSize() {
+  const rect = widgetEl.getBoundingClientRect();
+  window.widgetAPI.resizeContent(
+    Math.round(rect.width) + SHADOW_PAD * 2,
+    Math.round(rect.height) + SHADOW_PAD * 2
+  );
 }
 
-// ── Pointer-based drag ────────────────────────────────────────────────────────
+// ── Pointer-based reorder ─────────────────────────────────────────────────────
 
 function handleGripDown(e) {
+  if (e.button !== 0) return;
   e.preventDefault();
   e.stopPropagation();
 
@@ -162,12 +231,17 @@ function handleGripDown(e) {
   rows[idx].classList.add('dragging');
 
   dragState = {
+    pointerId: e.pointerId,
     ghost,
     rows,
     rowRects,
     sourceIdx: idx,
     targetIdx: idx,
     offsetY: e.clientY - sourceRect.top,
+    pointerY: e.clientY,
+    // rowRects are measured at this scroll offset.
+    startScrollTop: taskListEl.scrollTop,
+    scrollFrame: 0,
   };
 
   document.addEventListener('pointermove', handleDragMove);
@@ -176,12 +250,20 @@ function handleGripDown(e) {
 }
 
 function handleDragMove(e) {
-  if (!dragState) return;
-  const { ghost, rows, rowRects, sourceIdx, offsetY } = dragState;
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  dragState.pointerY = e.clientY;
+  updateDragTarget();
+  if (!dragState.scrollFrame) autoScrollStep();
+}
 
-  ghost.style.top = e.clientY - offsetY + 'px';
+function updateDragTarget() {
+  const { ghost, rows, rowRects, sourceIdx, offsetY, pointerY, startScrollTop } = dragState;
+  const ghostTop = pointerY - offsetY;
+  ghost.style.top = ghostTop + 'px';
 
-  const ghostCenterY = e.clientY - offsetY + rowRects[sourceIdx].height / 2;
+  // Compare in the coordinate space rowRects were measured in, before any auto-scroll.
+  const scrolled = taskListEl.scrollTop - startScrollTop;
+  const ghostCenterY = ghostTop + scrolled + rowRects[sourceIdx].height / 2;
   let newTarget = 0;
   for (let i = 0; i < rowRects.length; i++) {
     if (ghostCenterY > rowRects[i].top + rowRects[i].height / 2) newTarget = i;
@@ -200,10 +282,34 @@ function handleDragMove(e) {
   });
 }
 
-function handleDragUp() {
+// Scrolls the list while the dragged row is held near its top or bottom edge,
+// so rows outside the visible area can be reached.
+function autoScrollStep() {
   if (!dragState) return;
-  const { ghost, rows, sourceIdx, targetIdx } = dragState;
+  const { top, bottom } = taskListEl.getBoundingClientRect();
+  const { pointerY } = dragState;
+  let step = 0;
+  if (pointerY < top + AUTO_SCROLL_EDGE) {
+    step = -Math.min(AUTO_SCROLL_MAX_STEP, Math.ceil((top + AUTO_SCROLL_EDGE - pointerY) / 3));
+  } else if (pointerY > bottom - AUTO_SCROLL_EDGE) {
+    step = Math.min(AUTO_SCROLL_MAX_STEP, Math.ceil((pointerY - bottom + AUTO_SCROLL_EDGE) / 3));
+  }
 
+  const before = taskListEl.scrollTop;
+  if (step) taskListEl.scrollTop = before + step;
+  if (taskListEl.scrollTop === before) {
+    dragState.scrollFrame = 0;
+    return;
+  }
+  updateDragTarget();
+  dragState.scrollFrame = requestAnimationFrame(autoScrollStep);
+}
+
+function handleDragUp(e) {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  const { ghost, rows, sourceIdx, targetIdx, scrollFrame } = dragState;
+
+  if (scrollFrame) cancelAnimationFrame(scrollFrame);
   ghost.remove();
   rows.forEach((r) => {
     r.style.transform = '';
@@ -238,6 +344,13 @@ function startEditingTask(span) {
 
   let settled = false;
 
+  // Swap only this row's text back instead of re-rendering the list: a blur
+  // caused by pressing another row's button must leave that button in the DOM,
+  // or its click is lost.
+  const finish = () => {
+    if (textarea.isConnected) textarea.replaceWith(createTaskTextEl(task));
+  };
+
   const commit = () => {
     if (settled) return;
     settled = true;
@@ -246,20 +359,20 @@ function startEditingTask(span) {
       task.text = val;
       persist({ tasks });
     }
-    renderTasks();
+    finish();
   };
 
   const cancel = () => {
     if (settled) return;
     settled = true;
-    renderTasks();
+    finish();
   };
 
   textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (isSubmitEnter(e)) {
       e.preventDefault();
       textarea.blur();
-    } else if (e.key === 'Escape') {
+    } else if (e.key === 'Escape' && !e.isComposing) {
       e.preventDefault();
       cancel();
     }
@@ -275,35 +388,38 @@ function startEditingTask(span) {
 
 // ── Init & event listeners ────────────────────────────────────────────────────
 
-document.addEventListener('contextmenu', (e) => e.preventDefault());
+// Nothing on the widget accepts files; without this Chromium would open a
+// dropped file in place of the widget (main also blocks the navigation).
+document.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'none';
+});
+document.addEventListener('drop', (e) => {
+  if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault();
+});
 
 async function init() {
   const state = await window.widgetAPI.getState();
-  tasks = state.tasks || [];
+  tasks = Array.isArray(state.tasks) ? state.tasks : [];
   collapsed = !!state.collapsed;
   size = state.size || size;
   renderTasks();
   applyCollapsed();
   applySize();
   autoGrow(inputEl);
+  // Figtree's metrics differ from the fallback font the first measurement used.
+  document.fonts?.ready.then(() => autoGrow(inputEl));
 
-  const ro = new ResizeObserver((entries) => {
-    for (const _entry of entries) {
-      const rect = widgetEl.getBoundingClientRect();
-      const w = Math.round(rect.width) + SHADOW_PAD * 2;
-      const h = Math.round(rect.height) + SHADOW_PAD * 2;
-      window.widgetAPI.resizeContent(w, h);
-    }
-  });
-  ro.observe(widgetEl);
+  new ResizeObserver(reportWidgetSize).observe(widgetEl);
 }
 
 inputEl.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter' || e.shiftKey) return;
+  if (!isSubmitEnter(e)) return;
   e.preventDefault();
   const val = inputEl.value.trim();
   if (!val) return;
-  tasks.push({ id: Date.now() + Math.random(), text: val, done: false });
+  tasks.push({ id: newTaskId(), text: val, done: false });
   inputEl.value = '';
   autoGrow(inputEl);
   renderTasks();
@@ -327,12 +443,12 @@ taskListEl.addEventListener('click', (e) => {
 
   const btn = e.target.closest('button[data-action]');
   if (!btn) return;
-  const id = Number(btn.dataset.id) || btn.dataset.id;
+  const id = btn.dataset.id;
   const action = btn.dataset.action;
   if (action === 'toggle') {
-    tasks = tasks.map((t) => (String(t.id) === String(id) ? { ...t, done: !t.done } : t));
+    tasks = tasks.map((t) => (String(t.id) === id ? { ...t, done: !t.done } : t));
   } else if (action === 'delete') {
-    tasks = tasks.filter((t) => String(t.id) !== String(id));
+    tasks = tasks.filter((t) => String(t.id) !== id);
   }
   renderTasks();
   persist({ tasks });
@@ -374,10 +490,16 @@ headerEl.addEventListener('pointerdown', async (e) => {
   };
   const onUp = (ev) => {
     if (ev && ev.pointerId !== pointerId) return;
+    if (!active) return;
     active = false;
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onUp);
+    if (latestPointerPosition) {
+      window.widgetAPI.dragEnd();
+      // The widget may now be on a display with a different height.
+      applySize();
+    }
   };
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
@@ -404,22 +526,35 @@ headerEl.addEventListener('pointerdown', async (e) => {
 });
 
 resizeHandle.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
   e.preventDefault();
-  const startX = e.clientX;
-  const startY = e.clientY;
-  const origin = { ...size };
+  // Screen coordinates: main may move the window to keep it on-screen while it grows.
+  const startX = e.screenX;
+  const startY = e.screenY;
+  const pointerId = e.pointerId;
+  // Start from the list's rendered height: with few tasks it is shorter than
+  // the stored max-height, and dragging up must respond right away.
+  const origin = {
+    width: size.width,
+    height: Math.min(size.height, Math.round(taskListEl.getBoundingClientRect().height)),
+  };
+  let changed = false;
 
   const onMove = (ev) => {
-    const width = Math.min(480, Math.max(260, origin.width + (ev.clientX - startX)));
-    const height = Math.min(600, Math.max(120, origin.height + (ev.clientY - startY)));
+    if (ev.pointerId !== pointerId) return;
+    const width = Math.round(clamp(origin.width + (ev.screenX - startX), WIDGET_MIN_WIDTH, WIDGET_MAX_WIDTH));
+    const height = Math.round(clamp(origin.height + (ev.screenY - startY), LIST_MIN_HEIGHT, LIST_MAX_HEIGHT));
+    if (width === size.width && height === size.height) return;
     size = { width, height };
+    changed = true;
     applySize();
   };
-  const onUp = () => {
+  const onUp = (ev) => {
+    if (ev.pointerId !== pointerId) return;
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onUp);
-    persist({ size });
+    if (changed) persist({ size });
   };
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);

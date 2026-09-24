@@ -1,6 +1,6 @@
 # 自动发布 Windows 版本
 
-推送到 `main` 时，`Windows Release` 工作流自动打包并发布 GitHub Release；也可在 Actions 页面手动运行。一次 push 对应一个版本，使用该 push 最后的 commit。每次推送独立运行，不取消先前构建。
+推送到 `main` 时，`Windows Release` 工作流先运行 `npm test`，通过后自动打包并发布 GitHub Release；也可在 Actions 页面手动运行。测试失败时不会发布。一次 push 对应一个版本，使用该 push 最后的 commit。每次推送独立运行，不取消先前构建。
 
 发布文件：
 

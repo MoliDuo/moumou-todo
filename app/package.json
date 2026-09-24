@@ -12,8 +12,8 @@
     "dist:win": "electron-builder --win"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.xiangyu.floatingtodo",
@@ -22,12 +22,15 @@
     "files": [
       "main.js",
       "preload.js",
+      "store.js",
+      "window-bounds.js",
       "window-level-policy.js",
       "windows-desktop-hook.js",
       "renderer/**/*",
       "!renderer/**/*.test.js",
+      "build/icon.ico",
       "build/tray.png",
-      "build/tray16.png"
+      "build/tray@2x.png"
     ],
     "asarUnpack": [
       "node_modules/@koromix/koffi-win32-*/**/*"
@@ -61,6 +64,6 @@
     }
   },
   "dependencies": {
-    "koffi": "^3.2.1"
+    "koffi": "^3.3.1"
   }
 }

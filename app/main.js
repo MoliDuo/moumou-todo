@@ -1,62 +1,39 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage } = require('electron');
 const path = require('path');
-const fs = require('fs');
 const { WindowLevelPolicy } = require('./window-level-policy');
 const { startDesktopForegroundHook } = require('./windows-desktop-hook');
+const { Store, RENDERER_KEYS, sanitizeState } = require('./store');
+const { clampWindowPosition, maxWindowHeightFor } = require('./window-bounds');
+const {
+  SHADOW_PAD,
+  WIDGET_MIN_WIDTH,
+  WIDGET_MAX_WIDTH,
+  WIDGET_MIN_HEIGHT,
+  WIDGET_MAX_HEIGHT,
+  HEADER_HEIGHT,
+  clamp,
+} = require('./renderer/layout');
 
-const STORE_PATH = path.join(app.getPath('userData'), 'store.json');
-
-// Extra transparent margin baked into every window bound so the widget's
-// CSS drop shadow has room to render instead of being clipped by the OS window edge.
-const SHADOW_PAD = 32;
-
-// The 600 task-list max-height (see renderer.js resize handle) is only part of the
-// widget's total height — the header row plus its own padding sits on top of it.
-// CHROME_HEIGHT is a generous allowance for that (header row, plus room for the
-// task-input textarea growing to its own 120px max-height), so the window's max
-// bound never clips the bottom of the widget (rows, resize handle) once the task
-// list is dragged toward its own max.
-const CHROME_HEIGHT = 160;
-const MAX_WIDGET_HEIGHT = 600 + CHROME_HEIGHT;
-
-const DEFAULT_STATE = {
-  tasks: [
-    { id: 1, text: '买咖啡豆', done: true },
-    { id: 2, text: '写周报', done: false },
-    { id: 3, text: '回复邮件', done: false },
-  ],
-  collapsed: false,
-  pos: null,
-  size: { width: 320, height: 360 },
-  autoLaunch: true,
-  permanentTop: true,
-};
-
-function loadState() {
-  try {
-    const raw = fs.readFileSync(STORE_PATH, 'utf-8');
-    return { ...DEFAULT_STATE, ...JSON.parse(raw) };
-  } catch {
-    return { ...DEFAULT_STATE };
-  }
+// Keep `npm start` away from the installed app's tasks, single-instance lock and login item.
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), `${app.getName()}-dev`));
 }
 
-function saveState(partial) {
-  const current = loadState();
-  const next = { ...current, ...partial };
-  try {
-    fs.mkdirSync(path.dirname(STORE_PATH), { recursive: true });
-    fs.writeFileSync(STORE_PATH, JSON.stringify(next, null, 2));
-  } catch (err) {
-    console.error('save state failed', err);
-  }
-  return next;
-}
+const store = new Store({ filePath: path.join(app.getPath('userData'), 'store.json') });
+
+const MIN_WINDOW_WIDTH = WIDGET_MIN_WIDTH + SHADOW_PAD * 2;
+const MAX_WINDOW_WIDTH = WIDGET_MAX_WIDTH + SHADOW_PAD * 2;
+const MIN_WINDOW_HEIGHT = WIDGET_MIN_HEIGHT + SHADOW_PAD * 2;
+const MAX_WINDOW_HEIGHT = WIDGET_MAX_HEIGHT + SHADOW_PAD * 2;
+// Show the window without waiting for the renderer's first size report after this long.
+const INITIAL_SHOW_TIMEOUT_MS = 1000;
 
 let win = null;
 let tray = null;
 let isQuitting = false;
 let windowLevelPolicy = null;
+// Set by createWindow; called once the renderer has reported the widget size.
+let markWindowSized = null;
 
 function defaultPosition(width, height) {
   const { workArea } = screen.getPrimaryDisplay();
@@ -67,27 +44,52 @@ function defaultPosition(width, height) {
   };
 }
 
+// Nearest display's work area, so a position saved on a since-removed monitor comes back.
+function positionOnScreen(bounds) {
+  const { workArea } = screen.getDisplayMatching(bounds);
+  return clampWindowPosition(bounds, workArea, SHADOW_PAD);
+}
+
+function savePosition() {
+  if (!win || win.isDestroyed()) return;
+  const [x, y] = win.getPosition();
+  store.update({ pos: { x, y } });
+}
+
+// Returns true when the window had to be moved.
+function keepOnScreen() {
+  if (!win || win.isDestroyed()) return false;
+  const bounds = win.getBounds();
+  const { x, y } = positionOnScreen(bounds);
+  if (x === bounds.x && y === bounds.y) return false;
+  win.setPosition(x, y);
+  return true;
+}
+
 function createWindow() {
-  const state = loadState();
-  const size = state.size || DEFAULT_STATE.size;
-  const outerWidth = size.width + SHADOW_PAD * 2;
-  const outerHeaderHeight = 60 + SHADOW_PAD * 2;
-  const pos = state.pos || defaultPosition(outerWidth, outerHeaderHeight);
+  const state = store.get();
+  const width = state.size.width + SHADOW_PAD * 2;
+  const height = HEADER_HEIGHT + SHADOW_PAD * 2;
+  const pos = state.pos
+    ? positionOnScreen({ ...state.pos, width, height })
+    : defaultPosition(width, height);
 
   win = new BrowserWindow({
     x: pos.x,
     y: pos.y,
-    width: outerWidth,
-    height: outerHeaderHeight,
+    width,
+    height,
     useContentSize: true,
-    minWidth: 260 + SHADOW_PAD * 2,
-    maxWidth: 480 + SHADOW_PAD * 2,
-    minHeight: 52 + SHADOW_PAD * 2,
-    maxHeight: MAX_WIDGET_HEIGHT + SHADOW_PAD * 2,
+    minWidth: MIN_WINDOW_WIDTH,
+    maxWidth: MAX_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
+    maxHeight: MAX_WINDOW_HEIGHT,
     frame: false,
     transparent: true,
     hasShadow: false,
-    resizable: true,
+    // Transparent windows must not be user-resizable; the widget resizes the
+    // window itself through `window:resize-content`.
+    resizable: false,
     alwaysOnTop: state.permanentTop !== false,
     skipTaskbar: true,
     show: false,
@@ -98,6 +100,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
@@ -107,14 +110,36 @@ function createWindow() {
     startForegroundHook: process.platform === 'win32' ? startDesktopForegroundHook : null,
   });
   windowLevelPolicy.start();
+
+  // Dropping a file (or a link) on the widget would otherwise navigate away from it.
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('context-menu', (_e, params) => showEditMenu(params));
+
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
-  win.once('ready-to-show', () => win.show());
-
-  win.on('moved', () => {
-    const [x, y] = win.getPosition();
-    saveState({ pos: { x, y } });
+  // Wait for the renderer's first size report so the widget doesn't appear
+  // clipped to its header height and then jump open.
+  let readyToShow = false;
+  let sized = false;
+  let shown = false;
+  const showInitially = () => {
+    if (shown || !readyToShow || !sized || win.isDestroyed()) return;
+    shown = true;
+    win.show();
+  };
+  win.once('ready-to-show', () => {
+    readyToShow = true;
+    showInitially();
+    setTimeout(() => markWindowSized?.(), INITIAL_SHOW_TIMEOUT_MS);
   });
+  markWindowSized = () => {
+    if (sized) return;
+    sized = true;
+    showInitially();
+  };
+
+  win.on('moved', savePosition);
 
   win.on('close', (e) => {
     if (!isQuitting) {
@@ -135,20 +160,50 @@ function createWindow() {
   return win;
 }
 
+function showEditMenu({ isEditable, editFlags }) {
+  if (!isEditable || !win) return;
+  Menu.buildFromTemplate([
+    { label: '撤销', role: 'undo', enabled: editFlags.canUndo },
+    { label: '重做', role: 'redo', enabled: editFlags.canRedo },
+    { type: 'separator' },
+    { label: '剪切', role: 'cut', enabled: editFlags.canCut },
+    { label: '复制', role: 'copy', enabled: editFlags.canCopy },
+    { label: '粘贴', role: 'paste', enabled: editFlags.canPaste },
+    { type: 'separator' },
+    { label: '全选', role: 'selectAll', enabled: editFlags.canSelectAll },
+  ]).popup({ window: win });
+}
+
+function canAutoLaunch() {
+  return app.isPackaged && (process.platform === 'win32' || process.platform === 'darwin');
+}
+
+function loginItemOptions() {
+  // The portable build runs from a temporary extraction directory; the login
+  // item must point at the portable exe the user actually keeps.
+  return { path: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath };
+}
+
 function isAutoLaunchEnabled() {
-  return app.getLoginItemSettings().openAtLogin;
+  return canAutoLaunch() && app.getLoginItemSettings(loginItemOptions()).openAtLogin;
 }
 
 function setAutoLaunch(enabled) {
-  if (process.platform === 'win32' || process.platform === 'darwin') {
-    app.setLoginItemSettings({ openAtLogin: enabled });
-  }
-  saveState({ autoLaunch: enabled });
+  if (!canAutoLaunch()) return;
+  app.setLoginItemSettings({ openAtLogin: enabled, ...loginItemOptions() });
   buildTrayMenu();
 }
 
+// Earlier portable builds registered their temporary extraction path. If our
+// login item exists but points elsewhere, re-point it at this executable.
+function repairAutoLaunchPath() {
+  if (!canAutoLaunch() || process.platform !== 'win32') return;
+  const { openAtLogin, launchItems = [] } = app.getLoginItemSettings(loginItemOptions());
+  if (!openAtLogin && launchItems.some((item) => item.enabled)) setAutoLaunch(true);
+}
+
 function setPermanentTop(enabled) {
-  saveState({ permanentTop: enabled });
+  store.update({ permanentTop: enabled });
   windowLevelPolicy?.setPermanentTop(enabled);
   buildTrayMenu();
 }
@@ -171,13 +226,14 @@ function buildTrayMenu() {
     {
       label: '永久置顶',
       type: 'checkbox',
-      checked: loadState().permanentTop !== false,
+      checked: store.get().permanentTop !== false,
       click: (item) => setPermanentTop(item.checked),
     },
     { type: 'separator' },
     {
-      label: '开机自启动',
+      label: app.isPackaged ? '开机自启动' : '开机自启动（开发模式不可用）',
       type: 'checkbox',
+      enabled: canAutoLaunch(),
       checked: isAutoLaunchEnabled(),
       click: (item) => setAutoLaunch(item.checked),
     },
@@ -194,10 +250,10 @@ function buildTrayMenu() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, 'build', 'tray.png');
-  let image = nativeImage.createFromPath(iconPath);
-  if (process.platform === 'darwin') image = image.resize({ width: 16, height: 16 });
-  tray = new Tray(image);
+  // Windows picks the right size out of the multi-resolution .ico; elsewhere
+  // nativeImage pairs tray.png with tray@2x.png automatically.
+  const icon = process.platform === 'win32' ? 'icon.ico' : 'tray.png';
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'build', icon)));
   tray.setToolTip('哞哞清单');
   tray.on('click', () => {
     if (!win) return;
@@ -205,6 +261,67 @@ function createTray() {
     else win.show();
   });
   buildTrayMenu();
+}
+
+function isWindowAvailable() {
+  return win && !win.isDestroyed();
+}
+
+function registerIpc() {
+  ipcMain.handle('state:get', () => store.get());
+
+  ipcMain.on('state:save', (_e, partial) => {
+    const clean = sanitizeState(partial, RENDERER_KEYS);
+    if (Object.keys(clean).length > 0) store.update(clean);
+  });
+
+  ipcMain.on('window:resize-content', (_e, size) => {
+    if (!isWindowAvailable() || !size) return;
+    const { width, height } = size;
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+
+    const { workArea } = screen.getDisplayMatching(win.getBounds());
+    const maxHeight = Math.min(MAX_WINDOW_HEIGHT, maxWindowHeightFor(workArea, SHADOW_PAD));
+    const w = Math.round(clamp(width, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH));
+    const h = Math.round(clamp(height, MIN_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, maxHeight)));
+    win.setContentSize(w, h);
+    markWindowSized?.();
+    // Growing (expanding, resizing) near the screen edge must not push the widget off-screen.
+    if (keepOnScreen()) savePosition();
+  });
+
+  ipcMain.handle('window:get-position', () => (isWindowAvailable() ? win.getPosition() : [0, 0]));
+
+  // Renderer-driven drag: unlike the native -webkit-app-region drag region,
+  // this reliably starts on the very first pointerdown even when the window
+  // wasn't already focused (a plain client-area click both focuses and
+  // delivers the event, whereas a native drag-region click on an unfocused
+  // window only focuses it and eats that first click).
+  ipcMain.on('window:set-position', (_e, position) => {
+    if (!isWindowAvailable() || !position) return;
+
+    const { x, y } = position;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    win.setPosition(Math.round(x), Math.round(y));
+  });
+
+  // Programmatic setPosition never emits 'moved' on Windows, so the renderer
+  // reports the end of a drag explicitly.
+  ipcMain.on('window:drag-end', () => {
+    if (!isWindowAvailable()) return;
+    keepOnScreen();
+    savePosition();
+  });
+
+  ipcMain.on('window:set-ignore-mouse-events', (_e, ignore) => {
+    if (!isWindowAvailable() || typeof ignore !== 'boolean') return;
+    win.setIgnoreMouseEvents(ignore, ignore ? { forward: true } : undefined);
+  });
+}
+
+function onDisplaysChanged() {
+  if (keepOnScreen()) savePosition();
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -219,46 +336,23 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
-    const isFirstRun = !fs.existsSync(STORE_PATH);
+    store.get();
+    const isFirstRun = !store.existed;
 
+    registerIpc();
     createWindow();
     createTray();
 
-    if (isFirstRun) setAutoLaunch(true);
+    if (isFirstRun) {
+      // Write the file now so the next launch is no longer a first run.
+      store.update({});
+      setAutoLaunch(true);
+    } else {
+      repairAutoLaunchPath();
+    }
 
-    ipcMain.handle('state:get', () => loadState());
-
-    ipcMain.on('state:save', (_e, partial) => {
-      saveState(partial);
-    });
-
-    ipcMain.on('window:resize-content', (_e, { width, height }) => {
-      if (!win) return;
-      const w = Math.round(Math.min(480 + SHADOW_PAD * 2, Math.max(260 + SHADOW_PAD * 2, width)));
-      const h = Math.round(Math.min(MAX_WIDGET_HEIGHT + SHADOW_PAD * 2, Math.max(52 + SHADOW_PAD * 2, height)));
-      win.setContentSize(w, h);
-    });
-
-    ipcMain.handle('window:get-position', () => (win ? win.getPosition() : [0, 0]));
-
-    // Renderer-driven drag: unlike the native -webkit-app-region drag region,
-    // this reliably starts on the very first pointerdown even when the window
-    // wasn't already focused (a plain client-area click both focuses and
-    // delivers the event, whereas a native drag-region click on an unfocused
-    // window only focuses it and eats that first click).
-    ipcMain.on('window:set-position', (_e, position) => {
-      if (!win || win.isDestroyed() || !position) return;
-
-      const { x, y } = position;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-
-      win.setPosition(Math.round(x), Math.round(y));
-    });
-
-    ipcMain.on('window:set-ignore-mouse-events', (_e, ignore) => {
-      if (!win || win.isDestroyed() || typeof ignore !== 'boolean') return;
-      win.setIgnoreMouseEvents(ignore, ignore ? { forward: true } : undefined);
-    });
+    screen.on('display-removed', onDisplaysChanged);
+    screen.on('display-metrics-changed', onDisplaysChanged);
   });
 
   app.on('window-all-closed', () => {
