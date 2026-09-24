@@ -685,6 +685,11 @@ inputEl.addEventListener('keydown', (e) => {
   growTaskInput();
   renderTasks();
   persist({ tasks });
+  // A new task only shows in the to-do list.
+  if (view === 'done') {
+    view = 'tasks';
+    applyView();
+  }
 });
 
 inputEl.addEventListener('input', growTaskInput);

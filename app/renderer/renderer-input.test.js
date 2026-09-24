@@ -147,3 +147,16 @@ test('opening the completed view expands a collapsed widget', () => {
   elements['history-btn'].emit('click');
   assert.deepEqual(calls.saved.at(-1), { collapsed: false });
 });
+
+test('adding a task from the completed view switches back to the to-do list', () => {
+  const { document, elements, calls } = setupRenderer();
+  const bodyClasses = {};
+  document.body.classList.toggle = (name, on) => { bodyClasses[name] = on; };
+  elements['history-btn'].emit('click');
+  assert.equal(bodyClasses['view-done'], true);
+
+  addTask(elements, '写周报');
+  assert.equal(calls.saved.at(-1).tasks[0].text, '写周报');
+  assert.equal(bodyClasses['view-done'], false);
+  assert.equal(elements['history-btn']['attr:aria-pressed'], 'false');
+});
