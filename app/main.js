@@ -3,7 +3,7 @@ const path = require('path');
 const { WindowLevelPolicy } = require('./window-level-policy');
 const { startDesktopForegroundHook } = require('./windows-desktop-hook');
 const { Store, RENDERER_KEYS, sanitizeState } = require('./store');
-const { clampWindowPosition, maxWindowHeightFor } = require('./window-bounds');
+const { clampWindowPosition, maxWindowHeightFor, toWindowCoordinate } = require('./window-bounds');
 const {
   SHADOW_PAD,
   WIDGET_MIN_WIDTH,
@@ -32,6 +32,10 @@ let isQuitting = false;
 let windowLevelPolicy = null;
 // Set by createWindow; called once the renderer has reported the widget size.
 let markWindowSized = null;
+// The window size last set here. Windows at a non-100% scale factor report a
+// size that drifts by a pixel or so after each move (electron#9477), so moves
+// and on-screen checks use this instead of win.getBounds().
+let windowSize = null;
 
 function defaultPosition(width, height) {
   const { workArea } = screen.getPrimaryDisplay();
@@ -43,9 +47,15 @@ function defaultPosition(width, height) {
 }
 
 // Nearest display's work area, so a position saved on a since-removed monitor comes back.
-function positionOnScreen(bounds) {
+function positionOnScreen(bounds, options) {
   const { workArea } = screen.getDisplayMatching(bounds);
-  return clampWindowPosition(bounds, workArea, SHADOW_PAD);
+  return clampWindowPosition(bounds, workArea, SHADOW_PAD, options);
+}
+
+// setPosition would grow the window at a fractional scale factor; passing the
+// size explicitly keeps it fixed however often the window moves.
+function moveWindow(x, y) {
+  win.setBounds({ x, y, ...windowSize });
 }
 
 function savePosition() {
@@ -55,12 +65,12 @@ function savePosition() {
 }
 
 // Returns true when the window had to be moved.
-function keepOnScreen() {
+function keepOnScreen(options) {
   if (!win || win.isDestroyed()) return false;
-  const bounds = win.getBounds();
-  const { x, y } = positionOnScreen(bounds);
-  if (x === bounds.x && y === bounds.y) return false;
-  win.setPosition(x, y);
+  const [winX, winY] = win.getPosition();
+  const { x, y } = positionOnScreen({ x: winX, y: winY, ...windowSize }, options);
+  if (x === winX && y === winY) return false;
+  moveWindow(x, y);
   return true;
 }
 
@@ -68,6 +78,7 @@ function createWindow() {
   const state = store.get();
   const width = state.size.width + SHADOW_PAD * 2;
   const height = HEADER_HEIGHT + SHADOW_PAD * 2;
+  windowSize = { width, height };
   const pos = state.pos
     ? positionOnScreen({ ...state.pos, width, height })
     : defaultPosition(width, height);
@@ -277,15 +288,18 @@ function registerIpc() {
     const { width, height } = size;
     if (!Number.isFinite(width) || !Number.isFinite(height)) return;
 
-    const { workArea } = screen.getDisplayMatching(win.getBounds());
+    const [x, y] = win.getPosition();
+    const { workArea } = screen.getDisplayMatching({ x, y, ...windowSize });
     // The task input grows without a limit, so the screen is the only height bound.
     const maxHeight = maxWindowHeightFor(workArea, SHADOW_PAD);
     const w = Math.round(clamp(width, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH));
     const h = Math.round(clamp(height, MIN_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, maxHeight)));
+    const grew = h > windowSize.height;
+    windowSize = { width: w, height: h };
     win.setContentSize(w, h);
     markWindowSized?.();
-    // Growing (expanding, resizing) near the screen edge must not push the widget off-screen.
-    if (keepOnScreen()) savePosition();
+    // Growing (expanding, adding tasks) near the bottom edge must not push the list off-screen.
+    if (keepOnScreen({ fitBottom: grew })) savePosition();
   });
 
   ipcMain.handle('window:get-position', () => (isWindowAvailable() ? win.getPosition() : [0, 0]));
@@ -301,7 +315,7 @@ function registerIpc() {
     const { x, y } = position;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 
-    win.setPosition(Math.round(x), Math.round(y));
+    moveWindow(toWindowCoordinate(x), toWindowCoordinate(y));
   });
 
   // Programmatic setPosition never emits 'moved' on Windows, so the renderer
