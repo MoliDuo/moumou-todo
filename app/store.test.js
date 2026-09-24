@@ -95,3 +95,20 @@ test('the renderer cannot overwrite main-owned settings', () => {
   );
   assert.deepEqual(clean, { tasks: [], collapsed: true });
 });
+
+test('completion time and duration survive a save and reload', (t) => {
+  const filePath = tempStorePath(t);
+  const store = new Store({ filePath, onError: silent });
+  store.update(sanitizeState({
+    tasks: [
+      { id: 'a', text: 'done', done: true, doneAt: 1790000000000.4, duration: 45 },
+      { id: 'b', text: 'reopened', done: false, doneAt: 1790000000000, duration: 0 },
+      { id: 'c', text: 'typo', done: true, doneAt: 'noon', duration: 1e9 },
+    ],
+  }, RENDERER_KEYS));
+  assert.deepEqual(new Store({ filePath, onError: silent }).get().tasks, [
+    { id: 'a', text: 'done', done: true, doneAt: 1790000000000, duration: 45 },
+    { id: 'b', text: 'reopened', done: false },
+    { id: 'c', text: 'typo', done: true, duration: 6000 },
+  ]);
+});

@@ -7,6 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const WidgetLayout = require('../renderer/layout');
 const WidgetHitTest = require('../renderer/widget-hit-region');
+const WidgetHistory = require('../renderer/history');
 
 const RENDERER_PATH = path.join(__dirname, '..', 'renderer', 'renderer.js');
 const WIDGET_RECT = { left: 32, top: 32, right: 352, bottom: 232, width: 320, height: 200 };
@@ -42,6 +43,8 @@ function makeElement(id) {
     style: { setProperty() {} },
     classList: { toggle() {}, add() {}, remove() {} },
     querySelectorAll: () => [],
+    querySelector: () => null,
+    setAttribute(name, value) { this[`attr:${name}`] = value; },
     closest: () => null,
     getBoundingClientRect: () => ({ ...WIDGET_RECT }),
   };
@@ -60,6 +63,7 @@ function setupRenderer({ position = [10, 20] } = {}) {
     ...eventTarget(),
     WidgetLayout,
     WidgetHitTest,
+    WidgetHistory,
     widgetAPI: {
       setIgnoreMouseEvents: (ignore) => calls.ignore.push(ignore),
       saveState: (partial) => calls.saved.push(structuredClone(partial)),

@@ -86,3 +86,62 @@ test('a header click without movement does not report a drag', async () => {
   assert.deepEqual(calls.positions, []);
   assert.equal(calls.dragEnds, 0);
 });
+
+function addTask(elements, text) {
+  const input = elements['task-input'];
+  input.value = text;
+  input.emit('keydown', keydown());
+}
+
+function clickTaskButton(elements, action, id) {
+  const button = { dataset: { action, id: String(id) } };
+  elements['task-list'].emit('click', {
+    target: { closest: (selector) => (selector.startsWith('button') ? button : null) },
+  });
+}
+
+test('ticking a task records when it was completed, unticking clears it', () => {
+  const { elements, calls } = setupRenderer();
+  addTask(elements, '写周报');
+  const { id } = calls.saved.at(-1).tasks[0];
+
+  const before = Date.now();
+  clickTaskButton(elements, 'toggle', id);
+  const done = calls.saved.at(-1).tasks[0];
+  assert.equal(done.done, true);
+  assert.ok(done.doneAt >= before && done.doneAt <= Date.now());
+
+  clickTaskButton(elements, 'toggle', id);
+  const reopened = calls.saved.at(-1).tasks[0];
+  assert.equal(reopened.done, false);
+  assert.equal('doneAt' in reopened, false);
+});
+
+test('the history button switches to completed tasks grouped under today', () => {
+  const { document, elements, calls } = setupRenderer();
+  let bodyClasses = {};
+  document.body.classList.toggle = (name, on) => { bodyClasses[name] = on; };
+  addTask(elements, '写周报');
+  addTask(elements, '回复邮件');
+  clickTaskButton(elements, 'toggle', calls.saved.at(-1).tasks[0].id);
+
+  elements['history-btn'].emit('click');
+  assert.equal(bodyClasses['view-done'], true);
+  assert.equal(elements['history-btn']['attr:aria-pressed'], 'true');
+  const html = elements['done-list'].innerHTML;
+  assert.match(html, /今天/);
+  assert.match(html, /写周报/);
+  assert.doesNotMatch(html, /回复邮件/);
+  assert.match(html, /共 <strong>0分钟<\/strong>/);
+
+  elements['history-btn'].emit('click');
+  assert.equal(bodyClasses['view-done'], false);
+});
+
+test('opening the completed view expands a collapsed widget', () => {
+  const { elements, calls } = setupRenderer();
+  elements['collapse-btn'].emit('click');
+  assert.deepEqual(calls.saved.at(-1), { collapsed: true });
+  elements['history-btn'].emit('click');
+  assert.deepEqual(calls.saved.at(-1), { collapsed: false });
+});

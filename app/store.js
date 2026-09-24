@@ -5,6 +5,7 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const { DEFAULT_SIZE, WIDGET_MIN_WIDTH, WIDGET_MAX_WIDTH, LIST_MIN_HEIGHT, LIST_MAX_HEIGHT, clamp } =
   require('./renderer/layout');
+const { MAX_DURATION_MINUTES } = require('./renderer/history');
 
 const DEFAULT_STATE = Object.freeze({
   tasks: [
@@ -25,11 +26,20 @@ function sanitizeTasks(value) {
   if (!Array.isArray(value)) return undefined;
   return value
     .filter((task) => task && typeof task.text === 'string' && task.text.trim())
-    .map((task) => ({
-      id: typeof task.id === 'string' || Number.isFinite(task.id) ? task.id : randomUUID(),
-      text: task.text,
-      done: !!task.done,
-    }));
+    .map((task) => {
+      const clean = {
+        id: typeof task.id === 'string' || Number.isFinite(task.id) ? task.id : randomUUID(),
+        text: task.text,
+        done: !!task.done,
+      };
+      // Completion time (ms since epoch) only means something while the task is done.
+      if (clean.done && Number.isFinite(task.doneAt)) clean.doneAt = Math.round(task.doneAt);
+      // Minutes spent, set from the completed-tasks view; absent means 0.
+      if (Number.isFinite(task.duration) && task.duration > 0) {
+        clean.duration = Math.round(Math.min(task.duration, MAX_DURATION_MINUTES));
+      }
+      return clean;
+    });
 }
 
 function sanitizeSize(value) {

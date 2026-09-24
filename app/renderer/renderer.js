@@ -7,6 +7,8 @@ const {
   DEFAULT_SIZE,
   clamp,
 } = window.WidgetLayout;
+const { groupCompletedByDay, formatDayLabel, formatDuration, parseDuration, taskDuration, UNDATED_KEY } =
+  window.WidgetHistory;
 
 document.documentElement.style.setProperty('--shadow-pad', `${SHADOW_PAD}px`);
 
@@ -18,6 +20,8 @@ const collapseBtn = document.getElementById('collapse-btn');
 const iconDown = document.getElementById('icon-chevron-down');
 const iconUp = document.getElementById('icon-chevron-up');
 const resizeHandle = document.getElementById('resize-handle');
+const historyBtn = document.getElementById('history-btn');
+const doneListEl = document.getElementById('done-list');
 
 // Reorder auto-scroll: distance from the list edge that starts scrolling, and max px per frame.
 const AUTO_SCROLL_EDGE = 28;
@@ -25,6 +29,8 @@ const AUTO_SCROLL_MAX_STEP = 12;
 
 let tasks = [];
 let collapsed = false;
+// 'tasks' (the to-do list) or 'done' (completed tasks grouped by day).
+let view = 'tasks';
 let size = { ...DEFAULT_SIZE };
 let dragState = null;
 let mouseEventsIgnored = false;
@@ -187,6 +193,129 @@ function applyCollapsed() {
   iconUp.style.display = collapsed ? 'none' : 'block';
 }
 
+// ── Completed-tasks view ──────────────────────────────────────────────────────
+
+const CHECK_ICON = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+
+function dayTotalHtml(total) {
+  return `共 <strong>${escapeHtml(formatDuration(total))}</strong>`;
+}
+
+function durationButtonHtml(task) {
+  const minutes = taskDuration(task);
+  return `<button class="done-duration${minutes ? '' : ' zero'}" data-action="duration" data-id="${escapeHtml(task.id)}" title="设置耗时">${escapeHtml(formatDuration(minutes))}</button>`;
+}
+
+function renderDone() {
+  const groups = groupCompletedByDay(tasks);
+  if (groups.length === 0) {
+    doneListEl.innerHTML = '<div class="empty-hint">还没有已完成的任务</div>';
+    return;
+  }
+  const now = Date.now();
+  doneListEl.innerHTML = groups
+    .map((group) => `
+    <section class="done-day" data-day="${escapeHtml(group.key)}">
+      <div class="done-day-header">
+        <span class="done-day-label">${escapeHtml(group.key === UNDATED_KEY ? '更早' : formatDayLabel(group.dayStart, now))}</span>
+        <span class="done-day-total">${dayTotalHtml(group.total)}</span>
+      </div>
+      ${group.tasks
+        .map((task) => `
+      <div class="done-row">
+        <span class="done-check">${CHECK_ICON}</span>
+        <span class="done-text">${escapeHtml(task.text)}</span>
+        ${durationButtonHtml(task)}
+      </div>`)
+        .join('')}
+    </section>`)
+    .join('');
+}
+
+function updateDayTotal(dayKey) {
+  const group = groupCompletedByDay(tasks).find((g) => g.key === dayKey);
+  const totalEl = [...doneListEl.querySelectorAll('.done-day')]
+    .find((el) => el.dataset.day === dayKey)
+    ?.querySelector('.done-day-total');
+  if (group && totalEl) totalEl.innerHTML = dayTotalHtml(group.total);
+}
+
+function startEditingDuration(button) {
+  const task = tasks.find((t) => String(t.id) === button.dataset.id);
+  if (!task) return;
+  const dayKey = button.closest('.done-day').dataset.day;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'duration-input';
+  input.value = taskDuration(task) ? formatDuration(taskDuration(task)) : '';
+  input.placeholder = '分钟或1h30m';
+  input.setAttribute('aria-label', '耗时');
+
+  let settled = false;
+
+  // Swap only this button back (see startEditingTask for why not re-render).
+  const finish = () => {
+    if (input.isConnected) input.outerHTML = durationButtonHtml(task);
+    updateDayTotal(dayKey);
+  };
+
+  const commit = () => {
+    if (settled) return;
+    const minutes = parseDuration(input.value);
+    if (minutes === null) {
+      // Not a duration: keep editing so the typed text isn't silently lost.
+      input.classList.add('invalid');
+      if (document.activeElement !== input) {
+        settled = true;
+        finish();
+      }
+      return;
+    }
+    settled = true;
+    if (minutes !== taskDuration(task)) {
+      if (minutes) task.duration = minutes;
+      else delete task.duration;
+      persist({ tasks });
+    }
+    finish();
+  };
+
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    finish();
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (isSubmitEnter(e)) {
+      e.preventDefault();
+      commit();
+    } else if (e.key === 'Escape' && !e.isComposing) {
+      e.preventDefault();
+      cancel();
+    }
+  });
+  input.addEventListener('input', () => input.classList.remove('invalid'));
+  input.addEventListener('blur', commit);
+
+  button.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+function isEditingDuration() {
+  return !!doneListEl.querySelector('.duration-input');
+}
+
+function applyView() {
+  document.body.classList.toggle('view-done', view === 'done');
+  historyBtn.setAttribute('aria-pressed', String(view === 'done'));
+  historyBtn.title = view === 'done' ? '返回任务列表' : '已完成的任务';
+  historyBtn.setAttribute('aria-label', historyBtn.title);
+  if (view === 'done') renderDone();
+}
+
 // On a short screen, cap the list so the whole widget still fits the work area.
 function availableListHeight() {
   const available = window.screen && window.screen.availHeight;
@@ -197,7 +326,13 @@ function availableListHeight() {
 
 function applySize() {
   widgetEl.style.width = size.width + 'px';
-  taskListEl.style.maxHeight = Math.min(size.height, availableListHeight()) + 'px';
+  const maxHeight = Math.min(size.height, availableListHeight()) + 'px';
+  taskListEl.style.maxHeight = maxHeight;
+  doneListEl.style.maxHeight = maxHeight;
+}
+
+function visibleListEl() {
+  return view === 'done' ? doneListEl : taskListEl;
 }
 
 function reportWidgetSize() {
@@ -436,6 +571,27 @@ inputEl.addEventListener('keydown', (e) => {
 
 inputEl.addEventListener('input', growTaskInput);
 
+historyBtn.addEventListener('click', () => {
+  view = view === 'done' ? 'tasks' : 'done';
+  // The views live in the body, so switching must also reveal it.
+  if (collapsed) {
+    collapsed = false;
+    applyCollapsed();
+    persist({ collapsed });
+  }
+  applyView();
+});
+
+doneListEl.addEventListener('click', (e) => {
+  const button = e.target.closest('button[data-action="duration"]');
+  if (button) startEditingDuration(button);
+});
+
+// Relative day labels ("今天", "昨天") go stale when the widget sits open past midnight.
+window.addEventListener('focus', () => {
+  if (view === 'done' && !isEditingDuration()) renderDone();
+});
+
 collapseBtn.addEventListener('click', () => {
   collapsed = !collapsed;
   applyCollapsed();
@@ -454,7 +610,15 @@ taskListEl.addEventListener('click', (e) => {
   const id = btn.dataset.id;
   const action = btn.dataset.action;
   if (action === 'toggle') {
-    tasks = tasks.map((t) => (String(t.id) === id ? { ...t, done: !t.done } : t));
+    tasks = tasks.map((t) => {
+      if (String(t.id) !== id) return t;
+      // Record when the task was ticked; the completed view groups by it.
+      if (t.done) {
+        const { doneAt: _doneAt, ...rest } = t;
+        return { ...rest, done: false };
+      }
+      return { ...t, done: true, doneAt: Date.now() };
+    });
   } else if (action === 'delete') {
     tasks = tasks.filter((t) => String(t.id) !== id);
   }
@@ -468,7 +632,7 @@ taskListEl.addEventListener('click', (e) => {
 
 headerEl.addEventListener('pointerdown', async (e) => {
   if (e.button !== 0) return;
-  if (e.target.closest('#task-input, #collapse-btn')) return;
+  if (e.target.closest('#task-input, .header-btn')) return;
   e.preventDefault();
 
   const startX = e.screenX;
@@ -544,7 +708,7 @@ resizeHandle.addEventListener('pointerdown', (e) => {
   // the stored max-height, and dragging up must respond right away.
   const origin = {
     width: size.width,
-    height: Math.min(size.height, Math.round(taskListEl.getBoundingClientRect().height)),
+    height: Math.min(size.height, Math.round(visibleListEl().getBoundingClientRect().height)),
   };
   let changed = false;
 
