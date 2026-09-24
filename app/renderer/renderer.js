@@ -167,6 +167,8 @@ function persist(partial) {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
+const DELETE_ICON = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+
 function createTaskTextEl(task) {
   const span = document.createElement('span');
   span.className = task.done ? 'task-text done' : 'task-text';
@@ -174,12 +176,18 @@ function createTaskTextEl(task) {
   return span;
 }
 
+// Tasks shown in the to-do list; row indices refer to this list, not `tasks`.
+function listedTasks() {
+  return tasks.filter((t) => !t.archived);
+}
+
 function renderTasks() {
-  if (tasks.length === 0) {
+  const listed = listedTasks();
+  if (listed.length === 0) {
     taskListEl.innerHTML = '<div class="empty-hint">还没有任务，输入后按 Enter 添加</div>';
     return;
   }
-  taskListEl.innerHTML = tasks
+  taskListEl.innerHTML = listed
     .map(
       (t, idx) => `
     <div class="task-row" data-index="${idx}">
@@ -190,9 +198,7 @@ function renderTasks() {
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
       </button>
       <span class="task-text ${t.done ? 'done' : ''}">${escapeHtml(t.text)}</span>
-      <button class="task-delete" data-action="delete" data-id="${escapeHtml(t.id)}" title="删除" aria-label="删除">
-        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-      </button>
+      <button class="task-delete" data-action="delete" data-id="${escapeHtml(t.id)}" title="删除" aria-label="删除">${DELETE_ICON}</button>
     </div>`
     )
     .join('');
@@ -249,6 +255,7 @@ function renderDone() {
         <span class="done-check">${CHECK_ICON}</span>
         <span class="done-text" data-action="date" data-id="${escapeHtml(task.id)}" title="${escapeHtml(doneTextTitle(task))}">${escapeHtml(task.text)}</span>
         ${durationButtonHtml(task)}
+        <button class="task-delete" data-action="remove" data-id="${escapeHtml(task.id)}" title="彻底删除" aria-label="彻底删除">${DELETE_ICON}</button>
       </div>`)
         .join('')}
     </section>`)
@@ -584,8 +591,11 @@ function handleDragUp(e) {
   document.removeEventListener('pointercancel', handleDragUp);
 
   if (sourceIdx !== targetIdx) {
-    const moved = tasks.splice(sourceIdx, 1)[0];
-    tasks.splice(targetIdx, 0, moved);
+    // Reorder the listed tasks; archived ones keep their slots in `tasks`.
+    const listed = listedTasks();
+    listed.splice(targetIdx, 0, listed.splice(sourceIdx, 1)[0]);
+    let next = 0;
+    tasks = tasks.map((t) => (t.archived ? t : listed[next++]));
     persist({ tasks });
   }
   renderTasks();
@@ -596,7 +606,7 @@ function handleDragUp(e) {
 function startEditingTask(span) {
   const row = span.closest('.task-row');
   const idx = Number(row.dataset.index);
-  const task = tasks[idx];
+  const task = listedTasks()[idx];
   if (!task) return;
 
   const textarea = document.createElement('textarea');
@@ -706,6 +716,15 @@ historyBtn.addEventListener('click', () => {
 });
 
 doneListEl.addEventListener('click', (e) => {
+  const removeBtn = e.target.closest('button[data-action="remove"]');
+  if (removeBtn) {
+    // The one place a completed task is deleted for good.
+    tasks = tasks.filter((t) => String(t.id) !== removeBtn.dataset.id);
+    persist({ tasks });
+    renderTasks();
+    renderDone();
+    return;
+  }
   const button = e.target.closest('button[data-action="duration"]');
   if (button) startEditingDuration(button);
   const textEl = e.target.closest('.done-text[data-action="date"]');
@@ -751,7 +770,10 @@ taskListEl.addEventListener('click', (e) => {
       return { ...t, done: true, doneAt: Date.now() };
     });
   } else if (action === 'delete') {
-    tasks = tasks.filter((t) => String(t.id) !== id);
+    // A completed task leaves the list but stays in the completed view.
+    tasks = tasks
+      .filter((t) => t.done || String(t.id) !== id)
+      .map((t) => (String(t.id) === id ? { ...t, archived: true } : t));
   }
   renderTasks();
   persist({ tasks });

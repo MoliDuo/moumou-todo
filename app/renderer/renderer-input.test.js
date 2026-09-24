@@ -160,3 +160,43 @@ test('adding a task from the completed view switches back to the to-do list', ()
   assert.equal(bodyClasses['view-done'], false);
   assert.equal(elements['history-btn']['attr:aria-pressed'], 'false');
 });
+
+test('deleting an open task removes it for good', () => {
+  const { elements, calls } = setupRenderer();
+  addTask(elements, '写周报');
+  clickTaskButton(elements, 'delete', calls.saved.at(-1).tasks[0].id);
+  assert.deepEqual(calls.saved.at(-1).tasks, []);
+});
+
+test('deleting a completed task hides it from the list but keeps it in the completed view', () => {
+  const { elements, calls } = setupRenderer();
+  addTask(elements, '写周报');
+  const { id } = calls.saved.at(-1).tasks[0];
+  clickTaskButton(elements, 'toggle', id);
+  clickTaskButton(elements, 'delete', id);
+
+  const [archived] = calls.saved.at(-1).tasks;
+  assert.equal(archived.done, true);
+  assert.equal(archived.archived, true);
+  assert.doesNotMatch(elements['task-list'].innerHTML, /写周报/);
+
+  elements['history-btn'].emit('click');
+  assert.match(elements['done-list'].innerHTML, /写周报/);
+  assert.match(elements['done-list'].innerHTML, /data-action="remove"/);
+});
+
+test('deleting from the completed view removes the task for good', () => {
+  const { elements, calls } = setupRenderer();
+  addTask(elements, '写周报');
+  addTask(elements, '回复邮件');
+  const { id } = calls.saved.at(-1).tasks[0];
+  clickTaskButton(elements, 'toggle', id);
+  elements['history-btn'].emit('click');
+
+  const button = { dataset: { action: 'remove', id: String(id) } };
+  elements['done-list'].emit('click', {
+    target: { closest: (selector) => (selector === 'button[data-action="remove"]' ? button : null) },
+  });
+  assert.deepEqual(calls.saved.at(-1).tasks.map((t) => t.text), ['回复邮件']);
+  assert.doesNotMatch(elements['done-list'].innerHTML, /写周报/);
+});

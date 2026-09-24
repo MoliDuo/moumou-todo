@@ -112,3 +112,18 @@ test('completion time and duration survive a save and reload', (t) => {
     { id: 'c', text: 'typo', done: true, duration: 6000 },
   ]);
 });
+
+test('only completed tasks can be archived', () => {
+  const { tasks } = sanitizeState({
+    tasks: [
+      { id: 'a', text: 'hidden', done: true, archived: true },
+      { id: 'b', text: 'open', done: false, archived: true },
+      { id: 'c', text: 'odd', done: true, archived: 'yes' },
+    ],
+  });
+  assert.deepEqual(tasks, [
+    { id: 'a', text: 'hidden', done: true, archived: true },
+    { id: 'b', text: 'open', done: false },
+    { id: 'c', text: 'odd', done: true },
+  ]);
+});

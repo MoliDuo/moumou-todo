@@ -34,6 +34,8 @@ function sanitizeTasks(value) {
       };
       // Completion time (ms since epoch) only means something while the task is done.
       if (clean.done && Number.isFinite(task.doneAt)) clean.doneAt = Math.round(task.doneAt);
+      // Removed from the to-do list but kept in the completed view.
+      if (clean.done && task.archived === true) clean.archived = true;
       // Minutes spent, set from the completed-tasks view; absent means 0.
       if (Number.isFinite(task.duration) && task.duration > 0) {
         clean.duration = Math.round(Math.min(task.duration, MAX_DURATION_MINUTES));
