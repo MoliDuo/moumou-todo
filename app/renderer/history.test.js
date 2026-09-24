@@ -8,6 +8,11 @@ const {
   parseDuration,
   formatDuration,
   startOfDay,
+  addDays,
+  toDateInputValue,
+  parseDateInputValue,
+  moveToDay,
+  formatClock,
   UNDATED_KEY,
 } = require('./history');
 
@@ -96,4 +101,29 @@ test('a formatted duration parses back to the same minutes', () => {
   for (const minutes of [0, 5, 59, 60, 61, 135, 600]) {
     assert.equal(parseDuration(formatDuration(minutes)), minutes);
   }
+});
+
+test('date input values convert to and from local days', () => {
+  assert.equal(toDateInputValue(at(4, 23, 59)), '2026-09-04');
+  assert.equal(parseDateInputValue('2026-09-04'), startOfDay(at(4)));
+  for (const value of ['', '2026-9-4', '2026-02-30', '2026-13-01', 'yesterday']) {
+    assert.equal(parseDateInputValue(value), null, JSON.stringify(value));
+  }
+});
+
+test('adding days lands on local midnight', () => {
+  assert.equal(addDays(startOfDay(at(24)), -2), startOfDay(at(22)));
+  assert.equal(addDays(startOfDay(at(30)), 1), startOfDay(at(1, 12, 0, 9)));
+});
+
+test('moving a task to another day keeps its time of day', () => {
+  assert.equal(moveToDay(at(24, 9, 30), startOfDay(at(20)), NOW), at(20, 9, 30));
+  // Undated tasks land at noon.
+  assert.equal(moveToDay(undefined, startOfDay(at(20)), NOW), at(20, 12));
+  // Never later than now.
+  assert.equal(moveToDay(at(20, 18), startOfDay(at(24)), NOW), NOW);
+});
+
+test('completion times are shown as HH:MM', () => {
+  assert.equal(formatClock(at(24, 9, 5)), '09:05');
 });

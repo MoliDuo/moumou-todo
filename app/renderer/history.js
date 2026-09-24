@@ -19,6 +19,53 @@
     return date.getTime();
   }
 
+  // Local midnight `days` days after `dayStart` (negative goes back); calendar
+  // arithmetic keeps midnight across daylight-saving changes.
+  function addDays(dayStart, days) {
+    const date = new Date(dayStart);
+    date.setDate(date.getDate() + days);
+    return date.getTime();
+  }
+
+  function pad2(value) {
+    return String(value).padStart(2, '0');
+  }
+
+  // "YYYY-MM-DD" in local time, the value format of <input type="date">.
+  function toDateInputValue(timestamp) {
+    const date = new Date(timestamp);
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  }
+
+  // Local midnight for a "YYYY-MM-DD" value, or null when it isn't a real date.
+  function parseDateInputValue(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+    if (!match) return null;
+    const [year, month, day] = match.slice(1).map(Number);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+    return date.getTime();
+  }
+
+  // Completion time moved onto `dayStart`, keeping its time of day so the
+  // order within a day survives; never later than `now`. Tasks without a
+  // completion time land at noon.
+  function moveToDay(doneAt, dayStart, now = Date.now()) {
+    const target = new Date(dayStart);
+    if (Number.isFinite(doneAt)) {
+      const from = new Date(doneAt);
+      target.setHours(from.getHours(), from.getMinutes(), from.getSeconds(), from.getMilliseconds());
+    } else {
+      target.setHours(12, 0, 0, 0);
+    }
+    return Math.min(target.getTime(), now);
+  }
+
+  function formatClock(timestamp) {
+    const date = new Date(timestamp);
+    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  }
+
   function formatDayLabel(dayStart, now = Date.now()) {
     // Rounding absorbs the 23/25-hour days around daylight-saving changes.
     const daysAgo = Math.round((startOfDay(now) - dayStart) / DAY_MS);
@@ -109,7 +156,13 @@
   return {
     MAX_DURATION_MINUTES,
     UNDATED_KEY,
+    RELATIVE_DAYS,
     startOfDay,
+    addDays,
+    toDateInputValue,
+    parseDateInputValue,
+    moveToDay,
+    formatClock,
     formatDayLabel,
     groupCompletedByDay,
     parseDuration,

@@ -133,6 +133,8 @@ test('the history button switches to completed tasks grouped under today', () =>
   assert.match(html, /写周报/);
   assert.doesNotMatch(html, /回复邮件/);
   assert.match(html, /共 <strong>0分钟<\/strong>/);
+  // Clicking a task's text opens the completion-date editor; its tooltip says when.
+  assert.match(html, /class="done-text" data-action="date"[^>]*title="\d+月\d+日 \d\d:\d\d 完成，点击修改日期"/);
 
   elements['history-btn'].emit('click');
   assert.equal(bodyClasses['view-done'], false);

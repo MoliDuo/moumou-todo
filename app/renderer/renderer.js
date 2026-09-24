@@ -7,8 +7,21 @@ const {
   DEFAULT_SIZE,
   clamp,
 } = window.WidgetLayout;
-const { groupCompletedByDay, formatDayLabel, formatDuration, parseDuration, taskDuration, UNDATED_KEY } =
-  window.WidgetHistory;
+const {
+  groupCompletedByDay,
+  formatDayLabel,
+  formatDuration,
+  parseDuration,
+  taskDuration,
+  startOfDay,
+  addDays,
+  toDateInputValue,
+  parseDateInputValue,
+  moveToDay,
+  formatClock,
+  RELATIVE_DAYS,
+  UNDATED_KEY,
+} = window.WidgetHistory;
 
 document.documentElement.style.setProperty('--shadow-pad', `${SHADOW_PAD}px`);
 
@@ -31,6 +44,8 @@ let tasks = [];
 let collapsed = false;
 // 'tasks' (the to-do list) or 'done' (completed tasks grouped by day).
 let view = 'tasks';
+// The open completion-date editor in the done view: { id, leave() }.
+let dateEditor = null;
 let size = { ...DEFAULT_SIZE };
 let dragState = null;
 let mouseEventsIgnored = false;
@@ -206,7 +221,15 @@ function durationButtonHtml(task) {
   return `<button class="done-duration${minutes ? '' : ' zero'}" data-action="duration" data-id="${escapeHtml(task.id)}" title="设置耗时">${escapeHtml(formatDuration(minutes))}</button>`;
 }
 
+function doneTextTitle(task) {
+  if (!Number.isFinite(task.doneAt)) return '完成时间未知，点击设置日期';
+  const date = new Date(task.doneAt);
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${formatClock(task.doneAt)} 完成，点击修改日期`;
+}
+
 function renderDone() {
+  // Re-rendering drops any open date editor along with the old rows.
+  dateEditor = null;
   const groups = groupCompletedByDay(tasks);
   if (groups.length === 0) {
     doneListEl.innerHTML = '<div class="empty-hint">还没有已完成的任务</div>';
@@ -224,7 +247,7 @@ function renderDone() {
         .map((task) => `
       <div class="done-row">
         <span class="done-check">${CHECK_ICON}</span>
-        <span class="done-text">${escapeHtml(task.text)}</span>
+        <span class="done-text" data-action="date" data-id="${escapeHtml(task.id)}" title="${escapeHtml(doneTextTitle(task))}">${escapeHtml(task.text)}</span>
         ${durationButtonHtml(task)}
       </div>`)
         .join('')}
@@ -304,11 +327,106 @@ function startEditingDuration(button) {
   input.select();
 }
 
-function isEditingDuration() {
-  return !!doneListEl.querySelector('.duration-input');
+const CONFIRM_ICON = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+
+function findDoneText(id) {
+  return [...doneListEl.querySelectorAll('.done-text')].find((el) => el.dataset.id === id);
+}
+
+// Opens a row under the task for moving it to another day: 今天/昨天/前天
+// apply at once; a picked date applies on Enter, ✓ or clicking away; Esc cancels.
+function startEditingDate(id) {
+  if (dateEditor) {
+    const sameTask = dateEditor.id === id;
+    dateEditor.leave();
+    // Clicking the text again just closes the editor.
+    if (sameTask) return;
+  }
+  const task = tasks.find((t) => String(t.id) === id);
+  // Leaving the previous editor may have re-rendered the list.
+  const row = findDoneText(id)?.closest('.done-row');
+  if (!task || !row) return;
+
+  const today = startOfDay(Date.now());
+  const current = Number.isFinite(task.doneAt) ? startOfDay(task.doneAt) : null;
+  const editor = document.createElement('div');
+  editor.className = 'done-date-editor';
+  editor.dataset.id = id;
+  editor.innerHTML = `${RELATIVE_DAYS.map((label, daysAgo) => {
+    const dayStart = addDays(today, -daysAgo);
+    return `<button class="date-chip" data-day="${dayStart}" aria-pressed="${dayStart === current}">${label}</button>`;
+  }).join('')}
+    <input type="date" class="date-input" aria-label="完成日期" max="${toDateInputValue(today)}" value="${current === null ? '' : toDateInputValue(current)}">
+    <button class="date-confirm" title="确定" aria-label="确定">${CONFIRM_ICON}</button>`;
+  const dateInput = editor.querySelector('.date-input');
+
+  let settled = false;
+
+  const close = () => {
+    settled = true;
+    if (dateEditor && dateEditor.id === id) dateEditor = null;
+    editor.remove();
+  };
+
+  const apply = (dayStart) => {
+    if (settled) return;
+    if (dayStart === null || dayStart > today || dayStart === current) {
+      close();
+      return;
+    }
+    close();
+    task.doneAt = moveToDay(task.doneAt, dayStart);
+    persist({ tasks });
+    // The task moves to another day group, so this one re-render is expected.
+    renderDone();
+  };
+
+  const applyPicked = () => {
+    const dayStart = parseDateInputValue(dateInput.value);
+    if (dayStart === null || dayStart > today) {
+      dateInput.classList.add('invalid');
+      return false;
+    }
+    apply(dayStart);
+    return true;
+  };
+
+  editor.addEventListener('click', (e) => {
+    const chip = e.target.closest('.date-chip');
+    if (chip) apply(Number(chip.dataset.day));
+    else if (e.target.closest('.date-confirm') && !applyPicked()) dateInput.focus();
+  });
+  editor.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !e.isComposing) {
+      e.preventDefault();
+      close();
+    } else if (e.target === dateInput && isSubmitEnter(e)) {
+      e.preventDefault();
+      applyPicked();
+    }
+  });
+  dateInput.addEventListener('input', () => dateInput.classList.remove('invalid'));
+  // Clicked away: keep a valid picked date, drop anything else.
+  const leave = () => {
+    if (settled) return;
+    if (dateInput.value !== (current === null ? '' : toDateInputValue(current)) && applyPicked()) return;
+    close();
+  };
+  editor.addEventListener('focusout', (e) => {
+    if (!editor.contains(e.relatedTarget)) leave();
+  });
+
+  dateEditor = { id, leave };
+  row.after(editor);
+  dateInput.focus();
+}
+
+function isEditingDone() {
+  return !!doneListEl.querySelector('.duration-input, .done-date-editor');
 }
 
 function applyView() {
+  if (view !== 'done' && dateEditor) dateEditor.leave();
   document.body.classList.toggle('view-done', view === 'done');
   historyBtn.setAttribute('aria-pressed', String(view === 'done'));
   historyBtn.title = view === 'done' ? '返回任务列表' : '已完成的任务';
@@ -585,11 +703,19 @@ historyBtn.addEventListener('click', () => {
 doneListEl.addEventListener('click', (e) => {
   const button = e.target.closest('button[data-action="duration"]');
   if (button) startEditingDuration(button);
+  const textEl = e.target.closest('.done-text[data-action="date"]');
+  if (textEl) startEditingDate(textEl.dataset.id);
+});
+
+// Keep focus in an open date editor while clicking task text, so the click
+// handler (not focusout) decides whether it closes or moves to another task.
+doneListEl.addEventListener('mousedown', (e) => {
+  if (dateEditor && e.target.closest('.done-text')) e.preventDefault();
 });
 
 // Relative day labels ("今天", "昨天") go stale when the widget sits open past midnight.
 window.addEventListener('focus', () => {
-  if (view === 'done' && !isEditingDuration()) renderDone();
+  if (view === 'done' && !isEditingDone()) renderDone();
 });
 
 collapseBtn.addEventListener('click', () => {

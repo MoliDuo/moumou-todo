@@ -26,7 +26,10 @@ html, body {
   height: 100%;
   background: transparent;
   overflow: hidden;
-  font-family: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Figtree has no Chinese glyphs; name the platform UI fonts for them rather
+     than leaving it to font fallback. */
+  font-family: 'Figtree', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC',
+    'Noto Sans SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -118,15 +121,17 @@ html, body {
 #history-btn[aria-pressed="true"]:hover { background: #2e2b25; }
 #collapse-btn svg { display: none; }
 
+/* Sits where the task input is, with the same box, so the text lines up with
+   the input's placeholder when switching views. */
 #view-title {
   display: none;
   flex: 1;
   min-width: 0;
-  padding: 8px 6px;
+  border: 1px solid transparent;
+  padding: 8px 14px;
   font-size: 14px;
-  font-weight: 600;
   line-height: 1.4;
-  color: #111111;
+  color: #404040;
   cursor: grab;
 }
 
@@ -377,3 +382,56 @@ body.view-done #done-list { display: flex; }
   user-select: text;
 }
 .duration-input.invalid { border-color: #c2410c; box-shadow: 0 0 0 2px #fed7aa; }
+
+.done-text[data-action="date"] { cursor: pointer; }
+.done-text[data-action="date"]:hover { color: #111111; }
+
+/* Completion-date editor, opened under a task by clicking its text. */
+.done-date-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 6px 4px 32px;
+}
+
+.date-chip,
+.date-input,
+.date-confirm {
+  height: 24px;
+  border: 1px solid #e5e5e5;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #404040;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+.date-chip {
+  padding: 0 10px;
+  cursor: pointer;
+}
+.date-chip:hover,
+.date-confirm:hover { border-color: #a3a3a3; }
+.date-chip[aria-pressed="true"] { background: #111111; border-color: #111111; color: #ffffff; }
+.date-chip:focus-visible,
+.date-confirm:focus-visible { outline: 2px solid #111111; outline-offset: 1px; }
+
+.date-input {
+  -webkit-user-select: text;
+  user-select: text;
+  padding: 0 8px;
+  outline: none;
+}
+.date-input:focus { border-color: #111111; }
+.date-input.invalid { border-color: #c2410c; box-shadow: 0 0 0 2px #fed7aa; }
+.date-input::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
+
+.date-confirm {
+  width: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
